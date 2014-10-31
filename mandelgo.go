@@ -1,9 +1,8 @@
 package main
 
 import "github.com/veandco/go-sdl2/sdl"
-import "unsafe"
 
-//import "math/rand"
+import "unsafe"
 import "fmt"
 import "math"
 import "math/cmplx"
@@ -19,7 +18,7 @@ var x, y, w, h, xStep, yStep, ratio, minX, minY, magnify float64
 var updating, running bool
 
 var colours []uint32
-var pixels [500]uint32
+var pixels []uint32
 var time uint32
 
 var black uint32
@@ -27,7 +26,7 @@ var black uint32
 func main() {
 	var err error
 	running = true
-	xDim, yDim = 500, 300
+	xDim, yDim = 1200, 600
 	x, y = -0.5, 0
 	magnify = 1
 	bound = 50
@@ -55,6 +54,8 @@ func main() {
 		fmt.Println("No texture: %s\n", sdl.GetError())
 		return
 	}
+
+	pixels = make([]uint32, xDim)
 
 	colours = make([]uint32, 1000)
 	black = sdl.MapRGB(format, 0, 0, 0)
@@ -95,13 +96,13 @@ func main() {
 		if updating {
 			calcLine()
 			r := &sdl.Rect{int32(0), int32(line), int32(xDim), int32(1)}
-			
-			texture.Update(r, unsafe.Pointer(&pixels), xDim*4)
+			texture.Update(r, unsafe.Pointer(&pixels[0]), xDim*4)
 			renderer.Copy(texture, nil, nil)
 			renderer.Present()
-
+			
 			if line == yDim-1 {
 				updating = false
+				
 				fmt.Println(uint32(xDim*yDim)/(sdl.GetTicks() - time), "kp/s")
 			} else {
 				line++
@@ -133,14 +134,15 @@ func evalPoint(r, i float64) uint32 {
 	if r < p-2*math.Pow(p, 2)+0.25 || math.Pow(r+1, 2)+math.Pow(i, 2) < 1.0/16 {
 		return black
 	} else {
-		n, z := 0, complex(r, i)
-		for c := z; cmplx.Abs(z) < 3 && n < bound; n++ {
-			z = c + cmplx.Pow(z, 2)
+		n := 0
+		z := complex(r, i)
+		for c := z; real(z)*real(z) + imag(z)*imag(z) < 9 && n < bound; n++ {
+			z = c + complex(real(z)*real(z) - imag(z)*imag(z), 2*real(z)*imag(z))
 		}
 		if n == bound {
 			return black
 		} else {
-			k := math.Abs((float64(n+1) - math.Log(math.Log(cmplx.Abs(z)))/math.Log(2)) * 20)
+			k := math.Abs((float64(n) - math.Log(math.Log(cmplx.Abs(z)))/math.Log(2)) * 20)
 			return colours[int(k)%len(colours)]
 		}
 	}
@@ -153,7 +155,6 @@ func calcLine() {
 		pixels[i] = evalPoint(currentX, currentY)
 		currentX += xStep
 	}
-	currentY += yStep
 }
 
 func generatePalette() {
