@@ -97,7 +97,7 @@ func main() {
 			calcLine()
 			r := &sdl.Rect{int32(0), int32(line), int32(xDim), int32(1)}
 			texture.Update(r, unsafe.Pointer(&pixels[0]), xDim*4)
-			renderer.Copy(texture, nil, nil)
+			renderer.Copy(texture, r, r)
 			renderer.Present()
 			
 			if line == yDim-1 {
@@ -107,6 +107,8 @@ func main() {
 			} else {
 				line++
 			}
+		} else {
+			sdl.Delay(20)
 		}
 	}
 
@@ -142,7 +144,7 @@ func evalPoint(r, i float64) uint32 {
 		if n == bound {
 			return black
 		} else {
-			k := math.Abs((float64(n) - math.Log(math.Log(cmplx.Abs(z)))/math.Log(2)) * 20)
+			k := math.Abs((float64(n) - math.Log(math.Log(cmplx.Abs(z)))/math.Log(2)) * 10)
 			return colours[int(k)%len(colours)]
 		}
 	}
