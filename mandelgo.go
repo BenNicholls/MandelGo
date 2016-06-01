@@ -31,26 +31,24 @@ func main() {
 	magnify = 1
 	bound = 50
 
-	window = sdl.CreateWindow("MandelGo!", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, xDim, yDim, sdl.WINDOW_SHOWN)
+	window, err = sdl.CreateWindow("MandelGo!", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, xDim, yDim, sdl.WINDOW_SHOWN)
 	if window == nil {
 		fmt.Println("Failed to create window: %s\n", sdl.GetError())
 		return
 	}
 
-	renderer = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
-	if renderer == nil {
+	renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
+	if err != nil {
 		fmt.Println("Failed to create renderer: %s\n", sdl.GetError())
 		return
 	}
+	
+	f, err := window.GetPixelFormat()
 
-	format, err = sdl.AllocFormat(uint(window.GetPixelFormat()))
+	format, err = sdl.AllocFormat(uint(f))
+
+	texture, err = renderer.CreateTexture(f, sdl.TEXTUREACCESS_STREAMING, xDim, yDim)
 	if err != nil {
-		fmt.Println("No pixelformat: %s\n", sdl.GetError())
-		return
-	}
-
-	texture = sdl.CreateTexture(renderer, window.GetPixelFormat(), sdl.TEXTUREACCESS_STREAMING, xDim, yDim)
-	if texture == nil {
 		fmt.Println("No texture: %s\n", sdl.GetError())
 		return
 	}
