@@ -1,11 +1,13 @@
 package main
 
-import "github.com/veandco/go-sdl2/sdl"
+import (
+	"fmt"
+	"math"
+	"math/cmplx"
+	"unsafe"
 
-import "unsafe"
-import "fmt"
-import "math"
-import "math/cmplx"
+	"github.com/veandco/go-sdl2/sdl"
+)
 
 var window *sdl.Window
 var event sdl.Event
@@ -19,7 +21,7 @@ var updating, running bool
 
 var colours []uint32
 var pixels []uint32
-var time uint32
+var time uint64
 
 var black uint32
 
@@ -31,25 +33,25 @@ func main() {
 	magnify = 1
 	bound = 50
 
-	window, err = sdl.CreateWindow("MandelGo!", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, xDim, yDim, sdl.WINDOW_SHOWN)
+	window, err = sdl.CreateWindow("MandelGo!", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, int32(xDim), int32(yDim), sdl.WINDOW_SHOWN)
 	if window == nil {
-		fmt.Println("Failed to create window: %s\n", sdl.GetError())
+		fmt.Printf("Failed to create window: %s\n", sdl.GetError())
 		return
 	}
 
 	renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
 	if err != nil {
-		fmt.Println("Failed to create renderer: %s\n", sdl.GetError())
+		fmt.Printf("Failed to create renderer: %s\n", sdl.GetError())
 		return
 	}
-	
+
 	f, err := window.GetPixelFormat()
 
 	format, err = sdl.AllocFormat(uint(f))
 
-	texture, err = renderer.CreateTexture(f, sdl.TEXTUREACCESS_STREAMING, xDim, yDim)
+	texture, err = renderer.CreateTexture(f, sdl.TEXTUREACCESS_STREAMING, int32(xDim), int32(yDim))
 	if err != nil {
-		fmt.Println("No texture: %s\n", sdl.GetError())
+		fmt.Printf("No texture: %s\n", sdl.GetError())
 		return
 	}
 
@@ -65,22 +67,24 @@ func main() {
 			switch t := event.(type) {
 			case *sdl.QuitEvent:
 				running = false
-			case *sdl.KeyUpEvent:
-				switch t.Keysym.Sym {
-				case sdl.K_UP:
-					bound += 100
-					setup()
-				case sdl.K_DOWN:
-					if bound > 100 {
-						bound -= 100
+			case *sdl.KeyboardEvent:
+				if t.Type == sdl.KEYUP {
+					switch t.Keysym.Sym {
+					case sdl.K_UP:
+						bound += 100
+						setup()
+					case sdl.K_DOWN:
+						if bound > 100 {
+							bound -= 100
+							setup()
+						}
+					case sdl.K_PAGEUP:
+						magnify = magnify * 2
+						setup()
+					case sdl.K_PAGEDOWN:
+						magnify = magnify / 2
 						setup()
 					}
-				case sdl.K_PAGEUP:
-					magnify = magnify * 2
-					setup()
-				case sdl.K_PAGEDOWN:
-					magnify = magnify / 2
-					setup()
 				}
 			case *sdl.MouseButtonEvent:
 				if t.Type == sdl.MOUSEBUTTONUP && t.Button == sdl.BUTTON_LEFT {
@@ -97,11 +101,11 @@ func main() {
 			texture.Update(r, unsafe.Pointer(&pixels[0]), xDim*4)
 			renderer.Copy(texture, r, r)
 			renderer.Present()
-			
+
 			if line == yDim-1 {
 				updating = false
-				
-				fmt.Println(uint32(xDim*yDim)/(sdl.GetTicks() - time), "kp/s")
+
+				fmt.Println(uint64(xDim)*uint64(yDim)/(sdl.GetTicks64()-time), "kp/s")
 			} else {
 				line++
 			}
@@ -125,7 +129,7 @@ func setup() {
 	yStep = h / float64(yDim)
 	line = 0
 	updating = true
-	time = sdl.GetTicks()
+	time = sdl.GetTicks64()
 
 }
 
@@ -136,8 +140,8 @@ func evalPoint(r, i float64) uint32 {
 	} else {
 		n := 0
 		z := complex(r, i)
-		for c := z; real(z)*real(z) + imag(z)*imag(z) < 9 && n < bound; n++ {
-			z = c + complex(real(z)*real(z) - imag(z)*imag(z), 2*real(z)*imag(z))
+		for c := z; real(z)*real(z)+imag(z)*imag(z) < 9 && n < bound; n++ {
+			z = c + complex(real(z)*real(z)-imag(z)*imag(z), 2*real(z)*imag(z))
 		}
 		if n == bound {
 			return black

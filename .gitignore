@@ -1,0 +1,4 @@
+*.sh
+*.exe
+*.dll
+.vscode
