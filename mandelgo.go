@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/cmplx"
@@ -15,7 +16,8 @@ var renderer *sdl.Renderer
 var texture *sdl.Texture
 var format *sdl.PixelFormat
 
-var xDim, yDim, bound, line int
+var xDim, yDim int32
+var bound, line int
 var x, y, w, h, xStep, yStep, ratio, minX, minY, magnify float64
 var updating, running bool
 
@@ -26,41 +28,22 @@ var time uint64
 var black uint32
 
 func main() {
-	var err error
 	running = true
 	xDim, yDim = 1200, 600
 	x, y = -0.5, 0
 	magnify = 1
 	bound = 50
 
-	window, err = sdl.CreateWindow("MandelGo!", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, int32(xDim), int32(yDim), sdl.WINDOW_SHOWN)
-	if window == nil {
-		fmt.Printf("Failed to create window: %s\n", sdl.GetError())
-		return
-	}
-
-	renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
+	err := setup_sdl()
 	if err != nil {
-		fmt.Printf("Failed to create renderer: %s\n", sdl.GetError())
+		fmt.Println(err)
 		return
 	}
-
-	f, err := window.GetPixelFormat()
-
-	format, err = sdl.AllocFormat(uint(f))
-
-	texture, err = renderer.CreateTexture(f, sdl.TEXTUREACCESS_STREAMING, int32(xDim), int32(yDim))
-	if err != nil {
-		fmt.Printf("No texture: %s\n", sdl.GetError())
-		return
-	}
-
-	pixels = make([]uint32, xDim)
 
 	colours = make([]uint32, 1000)
 	black = sdl.MapRGB(format, 0, 0, 0)
 	generatePalette()
-	setup()
+	resize()
 
 	for running {
 		for event = sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
@@ -92,19 +75,23 @@ func main() {
 					y = minY + float64(t.Y)*yStep
 					setup()
 				}
+			case *sdl.WindowEvent:
+				if t.Event == sdl.WINDOWEVENT_RESIZED || t.Event == sdl.WINDOWEVENT_SIZE_CHANGED {
+					fmt.Println("window resized")
+					resize()
+				}
 			}
 		}
 
 		if updating {
 			calcLine()
-			r := &sdl.Rect{int32(0), int32(line), int32(xDim), int32(1)}
-			texture.Update(r, unsafe.Pointer(&pixels[0]), xDim*4)
+			r := &sdl.Rect{int32(0), int32(line), xDim, int32(1)}
+			texture.Update(r, unsafe.Pointer(&pixels[0]), int(xDim)*4)
 			renderer.Copy(texture, r, r)
 			renderer.Present()
 
-			if line == yDim-1 {
+			if line == int(yDim)-1 {
 				updating = false
-
 				fmt.Println(uint64(xDim)*uint64(yDim)/(sdl.GetTicks64()-time), "kp/s")
 			} else {
 				line++
@@ -119,7 +106,47 @@ func main() {
 	// window.Destroy()
 }
 
-func setup() {
+func setup_sdl() (err error) {
+	window, err = sdl.CreateWindow("MandelGo!", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, int32(xDim), int32(yDim), sdl.WINDOW_RESIZABLE|sdl.WINDOW_INPUT_FOCUS)
+	if window == nil {
+		return errors.New("Failed to create window: " + sdl.GetError().Error())
+	}
+
+	renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
+	if err != nil {
+		return errors.New("Failed to create renderer: " + sdl.GetError().Error())
+	}
+
+	f, err := window.GetPixelFormat()
+	format, err = sdl.AllocFormat(uint(f))
+
+	texture, err = renderer.CreateTexture(f, sdl.TEXTUREACCESS_STREAMING, int32(xDim), int32(yDim))
+	if err != nil {
+		return errors.New("No texture: " + sdl.GetError().Error())
+	}
+
+	return
+}
+
+func resize() (err error) {
+	xDim, yDim = window.GetSize()
+	pixels = make([]uint32, xDim)
+
+	f, err := window.GetPixelFormat()
+	if texture != nil {
+		texture.Destroy()
+	}
+	texture, err = renderer.CreateTexture(f, sdl.TEXTUREACCESS_STREAMING, int32(xDim), int32(yDim))
+	if err != nil {
+		return errors.New("No texture: " + sdl.GetError().Error())
+	}
+
+	setup()
+
+	return
+}
+
+func setup() {	
 	ratio = float64(xDim) / float64(yDim)
 	w = 3 * ratio / magnify
 	h = 3 / magnify
@@ -130,7 +157,6 @@ func setup() {
 	line = 0
 	updating = true
 	time = sdl.GetTicks64()
-
 }
 
 func evalPoint(r, i float64) uint32 {
@@ -155,14 +181,13 @@ func evalPoint(r, i float64) uint32 {
 func calcLine() {
 	currentY := minY + float64(line)*yStep
 	currentX := minX
-	for i := 0; i < xDim; i++ {
+	for i := int32(0); i < xDim; i++ {
 		pixels[i] = evalPoint(currentX, currentY)
 		currentX += xStep
 	}
 }
 
 func generatePalette() {
-
 	r1, g1, b1 := 25, 25, 122
 	r2, g2, b2 := 205, 133, 0
 	r3, g3, b3 := 255, 255, 255
@@ -176,7 +201,6 @@ func generatePalette() {
 		colours[i+k*2] = sdl.MapRGB(format, interpC(r3, r4, i, k), interpC(g3, g4, i, k), interpC(b3, b4, i, k))
 		colours[i+k*3] = sdl.MapRGB(format, interpC(r4, r1, i, k), interpC(g4, g1, i, k), interpC(b4, b1, i, k))
 	}
-
 }
 
 func interpC(c1, c2, i, k int) uint8 {
