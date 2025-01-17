@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/cmplx"
 	"unsafe"
 
 	"github.com/veandco/go-sdl2/sdl"
@@ -22,17 +21,28 @@ var x, y, w, h, xStep, yStep, ratio, minX, minY, magnify float64
 var updating, running bool
 
 var colours []uint32
-var pixels []uint32
+var pixelBuffers [8][]uint32
 var time uint64
 
 var black uint32
 
+var calculators chan lineData
+var num_calculators int = 0
+
+var colourCycleSpeed float64 = 10
+var colourOffset int = 0
+
 func main() {
 	running = true
-	xDim, yDim = 1200, 600
-	x, y = -0.5, 0
-	magnify = 1
-	bound = 50
+	xDim, yDim = 1920, 1080
+	// x, y = -0.5, 0
+	// magnify = 1
+	// bound = 50
+	x, y = -0.772403, -0.124375
+	magnify = 16384
+	bound = 550
+
+	calculators = make(chan lineData, 20)
 
 	err := setup_sdl()
 	if err != nil {
@@ -53,14 +63,31 @@ func main() {
 			case *sdl.KeyboardEvent:
 				if t.Type == sdl.KEYUP {
 					switch t.Keysym.Sym {
-					case sdl.K_UP:
+					case sdl.K_KP_PLUS:
 						bound += 100
 						setup()
-					case sdl.K_DOWN:
+					case sdl.K_KP_MINUS:
 						if bound > 100 {
 							bound -= 100
 							setup()
 						}
+					case sdl.K_UP:
+						colourOffset = (colourOffset + len(colours)/10) % len(colours)
+						setup()
+					case sdl.K_DOWN:
+						colourOffset = (colourOffset - len(colours)/10)
+						if colourOffset < 0 {
+							colourOffset += len(colours)
+						}
+						setup()
+					case sdl.K_LEFT:
+						if colourCycleSpeed > 1 {
+							colourCycleSpeed--
+							setup()
+						}
+					case sdl.K_RIGHT:
+						colourCycleSpeed++
+						setup()
 					case sdl.K_PAGEUP:
 						magnify = magnify * 2
 						setup()
@@ -84,20 +111,32 @@ func main() {
 		}
 
 		if updating {
-			calcLine()
-			r := &sdl.Rect{int32(0), int32(line), xDim, int32(1)}
-			texture.Update(r, unsafe.Pointer(&pixels[0]), int(xDim)*4)
-			renderer.Copy(texture, r, r)
-			renderer.Present()
+			select {
+			case line_completed := <-calculators:
+				num_calculators--
+				r := &sdl.Rect{int32(0), int32(line_completed.num), xDim, int32(1)}
+				texture.Update(r, unsafe.Pointer(&pixelBuffers[line_completed.bufferIndex][0]), int(xDim)*4)
+				if line < int(yDim)-1 {
+					num_calculators++
+					line_completed.num = line
+					go calcLine(line_completed, bound)
+					line++
+				}
+				renderer.Copy(texture, r, r)
+				if line%20 == 0 {
+					renderer.Present()
+				}
 
-			if line == int(yDim)-1 {
-				updating = false
-				fmt.Println(uint64(xDim)*uint64(yDim)/(sdl.GetTicks64()-time), "kp/s")
-			} else {
-				line++
+				if num_calculators == 0 {
+					output_stats()
+					renderer.Present()
+					updating = false
+				}
+			default:
+				//sdl.Delay(1)
 			}
 		} else {
-			sdl.Delay(20)
+			sdl.Delay(50)
 		}
 	}
 
@@ -130,7 +169,9 @@ func setup_sdl() (err error) {
 
 func resize() (err error) {
 	xDim, yDim = window.GetSize()
-	pixels = make([]uint32, xDim)
+	for buffer_index := range pixelBuffers {
+		pixelBuffers[buffer_index] = make([]uint32, xDim)
+	}
 
 	f, err := window.GetPixelFormat()
 	if texture != nil {
@@ -146,7 +187,12 @@ func resize() (err error) {
 	return
 }
 
-func setup() {	
+func setup() {
+	for num_calculators > 0 {
+		<-calculators
+		num_calculators--
+	}
+
 	ratio = float64(xDim) / float64(yDim)
 	w = 3 * ratio / magnify
 	h = 3 / magnify
@@ -155,36 +201,54 @@ func setup() {
 	xStep = w / float64(xDim)
 	yStep = h / float64(yDim)
 	line = 0
-	updating = true
 	time = sdl.GetTicks64()
+	begin_calculating()
 }
 
-func evalPoint(r, i float64) uint32 {
-	p := math.Sqrt(math.Pow(r-0.25, 2) + math.Pow(i, 2))
-	if r < p-2*math.Pow(p, 2)+0.25 || math.Pow(r+1, 2)+math.Pow(i, 2) < 1.0/16 {
+func begin_calculating() {
+	updating = true
+	for i := range pixelBuffers {
+		num_calculators++
+		go calcLine(lineData{line, i}, bound)
+		line++
+	}
+}
+
+func evalPoint(r, i float64, max_iterations int) uint32 {
+	q := (r-0.25)*(r-0.25) + i*i
+	if 4*q*(q+(r-0.25)) < i*i || (r+1)*(r+1)+i*i < 1.0/16 {
+		return black
+	}
+
+	n := 0
+	r2, i2 := r*r, i*i
+	for c_r, c_i := r, i; r2+i2 <= 4 && n < max_iterations; n++ {
+		r, i = r2-i2+c_r, (r+r)*i+c_i
+		r2, i2 = r*r, i*i
+	}
+
+	if n >= max_iterations {
 		return black
 	} else {
-		n := 0
-		z := complex(r, i)
-		for c := z; real(z)*real(z)+imag(z)*imag(z) < 9 && n < bound; n++ {
-			z = c + complex(real(z)*real(z)-imag(z)*imag(z), 2*real(z)*imag(z))
-		}
-		if n == bound {
-			return black
-		} else {
-			k := math.Abs((float64(n) - math.Log(math.Log(cmplx.Abs(z)))/math.Log(2)) * 10)
-			return colours[int(k)%len(colours)]
-		}
+		k := math.Abs((float64(n) - math.Log(math.Log(math.Hypot(r, i)))/math.Log(2)) * colourCycleSpeed)
+		return colours[(int(k)+colourOffset)%len(colours)]
 	}
 }
 
-func calcLine() {
-	currentY := minY + float64(line)*yStep
+type lineData struct {
+	num         int
+	bufferIndex int
+}
+
+func calcLine(current_line lineData, max_iterations int) {
+	currentY := minY + float64(current_line.num)*yStep
 	currentX := minX
 	for i := int32(0); i < xDim; i++ {
-		pixels[i] = evalPoint(currentX, currentY)
+		pixelBuffers[current_line.bufferIndex][i] = evalPoint(currentX, currentY, max_iterations)
 		currentX += xStep
 	}
+
+	calculators <- current_line
 }
 
 func generatePalette() {
@@ -205,4 +269,12 @@ func generatePalette() {
 
 func interpC(c1, c2, i, k int) uint8 {
 	return uint8(c1 + (i * (c2 - c1) / k))
+}
+
+func output_stats() {
+	render_time := sdl.GetTicks64() - time
+	fmt.Printf("Size: %dx%d (%d total pixels)\n", xDim, yDim, xDim*yDim)
+	fmt.Printf("Position: (%f, %f)\n", x, y)
+	fmt.Printf("Magnification: %.2f, Max Iterations: %d\n", magnify, bound)
+	fmt.Printf("Output complete in %dms (%d kp/s)\n", render_time, uint64(xDim)*uint64(yDim)/render_time)
 }
